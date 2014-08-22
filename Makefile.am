@@ -79,6 +79,7 @@ EXTRA_DIST = \
 	INSTALL.XenServer.md \
 	INSTALL.userspace.md \
 	INSTALL.Windows.md \
+	INSTALL.NETMAP \
 	IntegrationGuide.md \
 	NOTICE \
 	OPENFLOW-1.1+.md \

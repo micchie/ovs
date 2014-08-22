@@ -41,6 +41,9 @@
 
 #include "datapath.h"
 #include "vport.h"
+#ifdef DEV_NETMAP
+#include "dp-vale.h"
+#endif
 
 /**
  * struct vxlan_port - Keeps track of open UDP ports
@@ -157,6 +160,10 @@ static int vxlan_tnl_send(struct vport *vport, struct sk_buff *skb)
 	}
 
 	tun_key = &OVS_CB(skb)->egress_tun_info->tunnel;
+#ifdef DEV_NETMAP
+	if (skb_owned_by_vale(skb)) /* skb is fake */
+		skb = convert_to_real(skb);
+#endif
 
 	/* Route lookup */
 	saddr = tun_key->ipv4_src;

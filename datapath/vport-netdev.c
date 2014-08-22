@@ -34,6 +34,9 @@
 #include "vlan.h"
 #include "vport-internal_dev.h"
 #include "vport-netdev.h"
+#ifdef DEV_NETMAP
+#include "dp-vale.h"
+#endif
 
 static void netdev_port_receive(struct vport *vport, struct sk_buff *skb);
 
@@ -115,6 +118,17 @@ static struct vport *netdev_create(const struct vport_parms *parms)
 		goto error_free_vport;
 	}
 
+#ifdef DEV_NETMAP
+	/* don't attach a non-netmap interface to a vale datapath */
+	if (!NETMAP_CAPABLE(netdev_vport->dev)) {
+		err = -EINVAL;
+		goto error_put;
+	}
+	err = ovs_vale_ctl(parms->name, 0, 1);
+	if (err)
+		goto error_put;
+#endif
+
 	if (netdev_vport->dev->flags & IFF_LOOPBACK ||
 	    netdev_vport->dev->type != ARPHRD_ETHER ||
 	    ovs_is_internal_dev(netdev_vport->dev)) {
@@ -180,6 +194,9 @@ static void netdev_destroy(struct vport *vport)
 	if (ovs_netdev_get_vport(netdev_vport->dev))
 		ovs_netdev_detach_dev(vport);
 	rtnl_unlock();
+#ifdef DEV_NETMAP
+	ovs_vale_ctl(netdev_vport->dev->name, 0, 0);
+#endif
 
 	call_rcu(&netdev_vport->rcu, free_port_rcu);
 }
@@ -243,6 +260,10 @@ static int netdev_send(struct vport *vport, struct sk_buff *skb)
 
 	skb->dev = netdev_vport->dev;
 	len = skb->len;
+#ifdef DEV_NETMAP
+	if (ovs_vale_send(skb->dev, skb))
+		return len;
+#endif /* DEV_NETMAP */
 	dev_queue_xmit(skb);
 
 	return len;

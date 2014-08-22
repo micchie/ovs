@@ -19,7 +19,8 @@ openvswitch_sources = \
 	vport-internal_dev.c \
 	vport-lisp.c \
 	vport-netdev.c \
-	vport-vxlan.c
+	vport-vxlan.c \
+	dp-vale.c
 
 openvswitch_headers = \
 	compat.h \

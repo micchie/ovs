@@ -1,0 +1,41 @@
+                   Using Open vSwitch with netmap (VALE)
+                   ============================
+
+Open vSwitch can use VALE, a software switch that runs in a kernel
+ to accelerate its datapath.
+Thanks to efficient packet I/O based on netmap API and a novel
+packet forwarding algorithm, VALE accelerates Open vSwitch datapath
+by three times when forwarding short packets between 10 Gbps NICs.
+This file explains how to install and use the Open vSwitch with VALE.
+
+The VALE support of Open vSwitch is experimental.
+It has not been throughly tested.
+
+HOW TO BUILD CODE
+-----------------
+We assume that up-to-date version of netmap
+(http://info.iet.unipi.it/~luigi/netmap/) is already installed.
+
+Installation steps are same with INSTALL, except for specifying
+a path to netmap source in configure like:
+
+* `./configure --with-netmap=/home/micchie/netmap`
+
+This is because Open vswitch datapath (kernel module) leverages
+utility functions provided by netmap (defined in
+sys/dev/netmap/netmap_kern.h, sys/net/netmap.h etc.),
+and refers to symbols exported from netmap kernel module
+(LINUX/Module.symvers).
+
+Thus, you don't need to have loaded the netmap kernel module
+to compile Open vswitch, but need to have compiled it.
+
+To quickly build and run, ovs-dev.py script can also be used like:
+
+* `python utilities/ovs-dev.py env && python utilities/ovs-dev.py conf \
+	--with-netmap=/home/micchie/netmap make`
+
+See ovs-dev.py itself for detailed information.
+
+To use netmap API 4, pass -DNETMAP_API_4 to EXTRA_CFLAGS
+in datapath/linux/Kbuild.in

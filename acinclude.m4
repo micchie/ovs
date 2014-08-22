@@ -157,6 +157,24 @@ AC_DEFUN([OVS_CHECK_LINUX], [
   AM_CONDITIONAL(LINUX_ENABLED, test -n "$KBUILD")
 ])
 
+dnl OVS_CHECK_NETMAP
+dnl
+dnl Configure NETMAP source tree
+AC_DEFUN([OVS_CHECK_NETMAP], [
+  AC_ARG_WITH([netmap],
+              [AC_HELP_STRING([--with-netmap=/path/to/netmap],
+                              [Specify the netmap build directory])])
+  if test X"$with_netmap" != X; then
+    NETMAP_DIR=$with_netmap
+    AC_DEFINE([DEV_NETMAP], [1], [System uses the netmap module.])
+  else
+    NETMAP_DIR=
+  fi
+  AC_SUBST([NETMAP_DIR])
+
+  AM_CONDITIONAL([DEV_NETMAP], test -n "$NETMAP_DIR")
+])
+
 dnl OVS_CHECK_DPDK
 dnl
 dnl Configure DPDK source tree

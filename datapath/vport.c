@@ -34,7 +34,10 @@
 #include "datapath.h"
 #include "gso.h"
 #include "vport.h"
+#ifdef DEV_NETMAP
+#include "dp-vale.h"
 #include "vport-internal_dev.h"
+#endif
 
 static void ovs_vport_record_error(struct vport *,
 				   enum vport_err_type err_type);
@@ -190,6 +193,15 @@ struct vport *ovs_vport_add(const struct vport_parms *parms)
 		if (vport_ops_list[i]->type == parms->type) {
 			struct hlist_head *bucket;
 
+#ifdef DEV_NETMAP
+			/* filter out unsupported vport type */
+			if (parms->type != OVS_VPORT_TYPE_INTERNAL &&
+			    vale_prefix(ovs_dp_name(parms->dp))) {
+			       if (parms->type != OVS_VPORT_TYPE_NETDEV &&
+				   parms->type != OVS_VPORT_TYPE_VXLAN)
+				       break;
+			}
+#endif
 			vport = vport_ops_list[i]->create(parms);
 			if (IS_ERR(vport)) {
 				err = PTR_ERR(vport);
