@@ -188,6 +188,22 @@ AC_DEFUN([OVS_CHECK_LINUX_TC], [
     ])],
     [AC_DEFINE([HAVE_TCA_TUNNEL_KEY_ENC_DST_PORT], [1],
                [Define to 1 if TCA_TUNNEL_KEY_ENC_DST_PORT is avaiable.])])
+dnl OVS_CHECK_NETMAP
+dnl
+dnl Configure NETMAP source tree
+AC_DEFUN([OVS_CHECK_NETMAP], [
+  AC_ARG_WITH([netmap],
+              [AC_HELP_STRING([--with-netmap=/path/to/netmap],
+                              [Specify the netmap build directory])])
+  if test X"$with_netmap" != X; then
+    NETMAP_DIR=$with_netmap
+    AC_DEFINE([DEV_NETMAP], [1], [System uses the netmap module.])
+  else
+    NETMAP_DIR=
+  fi
+  AC_SUBST([NETMAP_DIR])
+
+  AM_CONDITIONAL([DEV_NETMAP], test -n "$NETMAP_DIR")
 ])
 
 dnl OVS_CHECK_DPDK

@@ -27,6 +27,7 @@ openvswitch_sources = \
 	vport.c \
 	vport-internal_dev.c \
 	vport-netdev.c
+	dp-vale.c
 
 vport_geneve_sources = vport-geneve.c
 vport_vxlan_sources = vport-vxlan.c

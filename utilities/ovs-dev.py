@@ -92,6 +92,9 @@ def conf():
         configure.append("--with-dpdk=" + options.with_dpdk)
         cflags += " -Wno-cast-align -Wno-bad-function-cast"  # DPDK warnings.
 
+    if options.with_netmap:
+        configure.append("--with-netmap=" + options.with_netmap)
+
     if options.optimize is None:
         options.optimize = 0
 
@@ -426,6 +429,8 @@ def main():
                      help="configure the man documentation install directory")
     group.add_option("--with-dpdk", dest="with_dpdk", metavar="DPDK_BUILD",
                      help="built with dpdk libraries located at DPDK_BUILD")
+    group.add_option("--with-netmap", dest="with_netmap", metavar="NETMAP_BUILD",
+                     help="built with netmap libraries located at NETMAP_BUILD")
     parser.add_option_group(group)
 
     group = optparse.OptionGroup(parser, "Optimization Flags")

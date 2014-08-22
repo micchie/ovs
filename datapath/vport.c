@@ -39,7 +39,10 @@
 #include "datapath.h"
 #include "gso.h"
 #include "vport.h"
+#ifdef DEV_NETMAP
+#include "dp-vale.h"
 #include "vport-internal_dev.h"
+#endif
 
 static LIST_HEAD(vport_ops_list);
 
@@ -243,6 +246,7 @@ struct vport *ovs_vport_add(const struct vport_parms *parms)
 {
 	struct vport_ops *ops;
 	struct vport *vport;
+<<<<<<< c5c1cc5d06f4c3c8f0a4dc784239d415a0fc0cbc
 
 	ops = ovs_vport_lookup(parms);
 	if (ops) {
@@ -251,6 +255,15 @@ struct vport *ovs_vport_add(const struct vport_parms *parms)
 		if (!try_module_get(ops->owner))
 			return ERR_PTR(-EAFNOSUPPORT);
 
+#ifdef DEV_NETMAP
+		/* filter out unsupported vport type */
+		if (parms->type != OVS_VPORT_TYPE_INTERNAL &&
+		    vale_prefix(ovs_dp_name(parms->dp))) {
+		       if (parms->type != OVS_VPORT_TYPE_NETDEV &&
+			   parms->type != OVS_VPORT_TYPE_VXLAN)
+			       return ERR_PTR(-EAFNOSUPPORT);
+		}
+#endif
 		vport = ops->create(parms);
 		if (IS_ERR(vport)) {
 			module_put(ops->owner);
@@ -558,6 +571,11 @@ void ovs_vport_send(struct vport *vport, struct sk_buff *skb, u8 mac_proto)
 	}
 
 	skb->dev = vport->dev;
+#ifdef DEV_NETMAP
+        if (ovs_vale_send(skb->dev, skb))
+		return;
+#endif /* DEV_NETMAP */
+
 	vport->ops->send(skb);
 	return;
 

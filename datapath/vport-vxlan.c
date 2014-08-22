@@ -29,6 +29,9 @@
 #include "datapath.h"
 #include "vport.h"
 #include "vport-netdev.h"
+#ifdef DEV_NETMAP
+#include "dp-vale.h"
+#endif
 
 static struct vport_ops ovs_vxlan_netdev_vport_ops;
 

@@ -13,6 +13,13 @@ ccflags-y += -I$(builddir)/..
 ccflags-y += -g
 ccflags-y += -include $(builddir)/kcompat.h
 
+ifneq (@NETMAP_DIR@,)
+NETMAP_DIR := @NETMAP_DIR@
+EXTRA_CFLAGS += -I$(NETMAP_DIR)/LINUX -I$(NETMAP_DIR)/sys -I$(NETMAP_DIR)/sys/dev -DDEV_NETMAP -DWITH_VALE
+#EXTRA_CFLAGS += -I$(NETMAP_DIR)/LINUX -I$(NETMAP_DIR)/sys -I$(NETMAP_DIR)/sys/dev -DDEV_NETMAP -DNETMAP_API_4
+KBUILD_EXTRA_SYMBOLS = $(NETMAP_DIR)/LINUX/Module.symvers
+endif
+
 # These include directories have to go before -I$(KSRC)/include.
 # NOSTDINC_FLAGS just happens to be a variable that goes in the
 # right place, even though it's conceptually incorrect.

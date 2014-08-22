@@ -36,6 +36,9 @@
 #include "vport.h"
 #include "vport-internal_dev.h"
 #include "vport-netdev.h"
+#ifdef DEV_NETMAP
+#include "dp-vale.h"
+#endif
 
 static struct vport_ops ovs_netdev_vport_ops;
 
@@ -103,6 +106,16 @@ struct vport *ovs_netdev_link(struct vport *vport, const char *name)
 		goto error_free_vport;
 	}
 
+#ifdef DEV_NETMAP
+	/* don't attach a non-netmap interface to a vale datapath */
+	if (!NETMAP_CAPABLE(vport->dev)) {
+		err = -EINVAL;
+		goto error_put;
+	}
+	err = ovs_vale_ctl(name, 0, 1);
+	if (err)
+		goto error_put;
+#endif
 	if (vport->dev->flags & IFF_LOOPBACK ||
 	    (vport->dev->type != ARPHRD_ETHER &&
 	     vport->dev->type != ARPHRD_NONE) ||
@@ -177,6 +190,9 @@ static void netdev_destroy(struct vport *vport)
 	if (vport->dev->priv_flags & IFF_OVS_DATAPATH)
 		ovs_netdev_detach_dev(vport);
 	rtnl_unlock();
+#ifdef DEV_NETMAP
+	ovs_vale_ctl(netdev_vport->dev->name, 0, 0);
+#endif
 
 	call_rcu(&vport->rcu, vport_netdev_free);
 }

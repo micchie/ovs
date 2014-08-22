@@ -31,10 +31,16 @@
 #include "datapath.h"
 #include "vport-internal_dev.h"
 #include "vport-netdev.h"
+#ifdef DEV_NETMAP
+#include "dp-vale.h"
+#endif
 
 struct internal_dev {
 	struct vport *vport;
 };
+#ifdef DEV_NETMAP
+#include "vport-internal_dev_netmap.h"
+#endif
 
 static struct vport_ops ovs_internal_vport_ops;
 
@@ -115,6 +121,9 @@ static void internal_dev_destructor(struct net_device *dev)
 
 	ovs_vport_free(vport);
 #ifndef HAVE_NEEDS_FREE_NETDEV
+#ifdef DEV_NETMAP
+	netmap_detach(dev);
+#endif
 	free_netdev(dev);
 #endif
 }
@@ -254,9 +263,21 @@ static struct vport *internal_dev_create(const struct vport_parms *parms)
 	err = register_netdevice(vport->dev);
 	if (err)
 		goto error_unlock;
+#ifdef DEV_NETMAP
+	/* don't attach (useless) datapath itself */
+	if (parms->port_no != OVSP_LOCAL)
+		vport_internal_netmap_attach(internal_dev);
+#endif
 
 	dev_set_promiscuity(vport->dev, 1);
 	rtnl_unlock();
+#ifdef DEV_NETMAP
+	if (parms->port_no != OVSP_LOCAL) {
+		err = ovs_vale_ctl(parms->name, 1, 1);
+		if (err)
+			goto error_free_netdev;
+	}
+#endif
 	netif_start_queue(vport->dev);
 
 	return vport;
@@ -277,6 +298,9 @@ static void internal_dev_destroy(struct vport *vport)
 	netif_stop_queue(vport->dev);
 	rtnl_lock();
 	dev_set_promiscuity(vport->dev, -1);
+#ifdef DEV_NETMAP
+	ovs_vale_ctl(vport->dev->name, 1, 0);
+#endif
 
 	/* unregister_netdevice() waits for an RCU grace period. */
 	unregister_netdevice(vport->dev);
@@ -322,7 +346,7 @@ static struct vport_ops ovs_internal_vport_ops = {
 
 int ovs_is_internal_dev(const struct net_device *netdev)
 {
-	return netdev->netdev_ops == &internal_dev_netdev_ops;
+	return netdev->netdev_ops->ndo_get_stats64 == internal_dev_get_stats;
 }
 
 struct vport *ovs_internal_dev_get_vport(struct net_device *netdev)
