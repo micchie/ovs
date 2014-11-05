@@ -56,12 +56,24 @@ struct table_instance {
 	bool keep_flows;
 };
 
+struct flow_table;
+struct flow_fastpath;
+struct flow_fastpath {
+	void (*init)(struct flow_fastpath *);
+	struct sw_flow* (*lookup)(struct sk_buff *skb,
+				  struct sw_flow_key *key, int *error);
+	void (*update)(struct flow_table *tbl, struct flow_fastpath *fp);
+	void *data; /* opaque to store optimal database */
+	struct mask_array *ma;
+};
+
 struct flow_table {
 	struct table_instance __rcu *ti;
 	struct mask_cache_entry __percpu *mask_cache;
 	struct mask_array __rcu *mask_array;
 	unsigned long last_rehash;
 	unsigned int count;
+	struct flow_fastpath __rcu *fastpath;
 };
 
 extern struct kmem_cache *flow_stats_cache;

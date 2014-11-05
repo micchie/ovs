@@ -628,6 +628,7 @@ static int output_userspace(struct datapath *dp, struct sk_buff *skb,
 	int rem;
 
 	upcall.cmd = OVS_PACKET_CMD_ACTION;
+	ovs_flow_key_rebuild(skb, key);
 	upcall.userdata = NULL;
 	upcall.portid = 0;
 	upcall.egress_tun_info = NULL;
@@ -789,14 +790,22 @@ static int execute_recirc(struct datapath *dp, struct sk_buff *skb,
 			  const struct nlattr *a, int rem)
 {
 	struct deferred_action *da;
+	const struct flow_fastpath *fp;
+	int err;
 
-	if (!is_flow_key_valid(key)) {
-		int err;
+	fp = rcu_dereference_ovsl(dp->table.fastpath);
+	if (fp) {
+		struct sw_flow *flow;
 
+		flow = fp->lookup(skb, key, &err);
+		if (likely(!err)) {
+			OVS_CB(skb)->flow = flow;
+			OVS_CB(skb)->key_maybe_masked = 1;
+		}
+	} else if (!is_flow_key_valid(key))
 		err = ovs_flow_key_update(skb, key);
-		if (err)
-			return err;
-	}
+	if (err)
+		return err;
 	BUG_ON(!is_flow_key_valid(key));
 
 	if (!nla_is_last(a, rem)) {

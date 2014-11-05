@@ -50,66 +50,6 @@
 #include "flow.h"
 #include "flow_netlink.h"
 
-static void update_range(struct sw_flow_match *match,
-			 size_t offset, size_t size, bool is_mask)
-{
-	struct sw_flow_key_range *range;
-	size_t start = rounddown(offset, sizeof(long));
-	size_t end = roundup(offset + size, sizeof(long));
-
-	if (!is_mask)
-		range = &match->range;
-	else
-		range = &match->mask->range;
-
-	if (range->start == range->end) {
-		range->start = start;
-		range->end = end;
-		return;
-	}
-
-	if (range->start > start)
-		range->start = start;
-
-	if (range->end < end)
-		range->end = end;
-}
-
-#define SW_FLOW_KEY_PUT(match, field, value, is_mask) \
-	do { \
-		update_range(match, offsetof(struct sw_flow_key, field),    \
-			     sizeof((match)->key->field), is_mask);	    \
-		if (is_mask)						    \
-			(match)->mask->key.field = value;		    \
-		else							    \
-			(match)->key->field = value;		            \
-	} while (0)
-
-#define SW_FLOW_KEY_MEMCPY_OFFSET(match, offset, value_p, len, is_mask)	    \
-	do {								    \
-		update_range(match, offset, len, is_mask);		    \
-		if (is_mask)						    \
-			memcpy((u8 *)&(match)->mask->key + offset, value_p, len);\
-		else							    \
-			memcpy((u8 *)(match)->key + offset, value_p, len);  \
-	} while (0)
-
-#define SW_FLOW_KEY_MEMCPY(match, field, value_p, len, is_mask)		      \
-	SW_FLOW_KEY_MEMCPY_OFFSET(match, offsetof(struct sw_flow_key, field), \
-				  value_p, len, is_mask)
-
-#define SW_FLOW_KEY_MEMSET_FIELD(match, field, value, is_mask)		    \
-	do {								    \
-		update_range(match, offsetof(struct sw_flow_key, field),    \
-			     sizeof((match)->key->field), is_mask);	    \
-		if (is_mask)						    \
-			memset((u8 *)&(match)->mask->key.field, value,      \
-			       sizeof((match)->mask->key.field));	    \
-		else							    \
-			memset((u8 *)&(match)->key->field, value,           \
-			       sizeof((match)->key->field));                \
-	} while (0)
-
 static bool match_validate(const struct sw_flow_match *match,
 			   u64 key_attrs, u64 mask_attrs, bool log)
 {

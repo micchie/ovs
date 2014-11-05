@@ -267,13 +267,18 @@ void ovs_dp_process_packet(struct sk_buff *skb, struct sw_flow_key *key)
 	stats = this_cpu_ptr(dp->stats_percpu);
 
 	/* Look up flow. */
-	flow = ovs_flow_tbl_lookup_stats(&dp->table, key, skb_get_hash(skb),
-					 &n_mask_hit);
+	flow = OVS_CB(skb)->flow;
+	if (flow)
+		n_mask_hit = 1; /* XXX pretend mask cache hit */
+	else if (!OVS_CB(skb)->key_maybe_masked)
+		flow = ovs_flow_tbl_lookup_stats(&dp->table, key,
+				skb_get_hash(skb), &n_mask_hit);
 	if (unlikely(!flow)) {
 		struct dp_upcall_info upcall;
 		int error;
 
 		upcall.cmd = OVS_PACKET_CMD_MISS;
+		ovs_flow_key_rebuild(skb, key);
 		upcall.userdata = NULL;
 		upcall.portid = ovs_vport_find_upcall_portid(p, skb);
 		upcall.egress_tun_info = NULL;

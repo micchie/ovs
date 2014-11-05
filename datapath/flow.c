@@ -681,8 +681,19 @@ int ovs_flow_key_update(struct sk_buff *skb, struct sw_flow_key *key)
 	return key_extract(skb, key);
 }
 
-int ovs_flow_key_extract(const struct ovs_tunnel_info *tun_info,
-			 struct sk_buff *skb, struct sw_flow_key *key)
+int ovs_flow_key_rebuild(struct sk_buff *skb, struct sw_flow_key *key)
+{
+	if (!OVS_CB(skb)->key_maybe_masked)
+		return 0;
+	else if (ovs_flow_key_update(skb, key))
+		return -1;
+	OVS_CB(skb)->key_maybe_masked = 0;
+	return 0;
+}
+
+void ovs_metadata_key_extract(const struct ovs_tunnel_info *tun_info,
+			     struct sk_buff *skb,
+			     struct sw_flow_key *key)
 {
 	/* Extract metadata from packet. */
 	if (tun_info) {
@@ -708,7 +719,13 @@ int ovs_flow_key_extract(const struct ovs_tunnel_info *tun_info,
 	key->phy.skb_mark = skb->mark;
 	key->ovs_flow_hash = 0;
 	key->recirc_id = 0;
+}
 
+int ovs_flow_key_extract(const struct ovs_tunnel_info *tun_info,
+			 struct sk_buff *skb,
+			 struct sw_flow_key *key)
+{
+	ovs_metadata_key_extract(tun_info, skb, key);
 	return key_extract(skb, key);
 }
 
@@ -724,4 +741,29 @@ int ovs_flow_key_extract_userspace(const struct nlattr *attr,
 		return err;
 
 	return key_extract(skb, key);
+}
+
+void update_range(struct sw_flow_match *match,
+		  size_t offset, size_t size, bool is_mask)
+{
+	struct sw_flow_key_range *range;
+	size_t start = rounddown(offset, sizeof(long));
+	size_t end = roundup(offset + size, sizeof(long));
+
+	if (!is_mask)
+		range = &match->range;
+	else
+		range = &match->mask->range;
+
+	if (range->start == range->end) {
+		range->start = start;
+		range->end = end;
+		return;
+	}
+
+	if (range->start > start)
+		range->start = start;
+
+	if (range->end < end)
+		range->end = end;
 }

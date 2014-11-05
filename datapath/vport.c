@@ -448,6 +448,8 @@ void ovs_vport_receive(struct vport *vport, struct sk_buff *skb,
 {
 	struct pcpu_sw_netstats *stats;
 	struct sw_flow_key key;
+	const struct datapath *dp = vport->dp;
+	const struct flow_fastpath *fp;
 	int error;
 
 	stats = this_cpu_ptr(vport->percpu_stats);
@@ -459,7 +461,21 @@ void ovs_vport_receive(struct vport *vport, struct sk_buff *skb,
 	ovs_skb_init_inner_protocol(skb);
 	OVS_CB(skb)->input_vport = vport;
 	OVS_CB(skb)->egress_tun_info = NULL;
-	error = ovs_flow_key_extract(tun_info, skb, &key);
+	OVS_CB(skb)->flow = NULL;
+	fp = rcu_dereference_ovsl(dp->table.fastpath);
+	if (fp) {
+		struct sw_flow *flow;
+
+		memset(&key, 0, sizeof(key));
+		ovs_metadata_key_extract(tun_info, skb, &key);
+		flow = fp->lookup(skb, &key, &error);
+		if (likely(!error)) {
+			OVS_CB(skb)->flow = flow;
+			OVS_CB(skb)->key_maybe_masked = 1;
+		}
+	} else
+		/* Extract flow from 'skb' into 'key'. */
+		error = ovs_flow_key_extract(tun_info, skb, &key);
 	if (unlikely(error)) {
 		kfree_skb(skb);
 		return;

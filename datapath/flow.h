@@ -258,5 +258,47 @@ int ovs_flow_key_extract(const struct ovs_tunnel_info *tun_info,
 int ovs_flow_key_extract_userspace(const struct nlattr *attr,
 				   struct sk_buff *skb,
 				   struct sw_flow_key *key, bool log);
+/* Update the non-metadata part of the flow key using skb. */
+int ovs_flow_key_update(struct sk_buff *skb, struct sw_flow_key *key);
+int ovs_flow_key_rebuild(struct sk_buff *skb, struct sw_flow_key *key);
+void ovs_metadata_key_extract(const struct ovs_tunnel_info *tun_info,
+			     struct sk_buff *skb,
+			     struct sw_flow_key *key);
+
+void update_range(struct sw_flow_match *, size_t, size_t, bool);
+#define SW_FLOW_KEY_PUT(match, field, value, is_mask) \
+	do { \
+		update_range(match, offsetof(struct sw_flow_key, field),    \
+			     sizeof((match)->key->field), is_mask);	    \
+		if (is_mask)						    \
+			(match)->mask->key.field = value;		    \
+		else							    \
+			(match)->key->field = value;		            \
+	} while (0)
+
+#define SW_FLOW_KEY_MEMCPY_OFFSET(match, offset, value_p, len, is_mask)	    \
+	do {								    \
+		update_range(match, offset, len, is_mask);		    \
+		if (is_mask)						    \
+			memcpy((u8 *)&(match)->mask->key + offset, value_p, len);\
+		else							    \
+			memcpy((u8 *)(match)->key + offset, value_p, len);  \
+	} while (0)
+
+#define SW_FLOW_KEY_MEMCPY(match, field, value_p, len, is_mask)		      \
+	SW_FLOW_KEY_MEMCPY_OFFSET(match, offsetof(struct sw_flow_key, field), \
+				  value_p, len, is_mask)
+
+#define SW_FLOW_KEY_MEMSET_FIELD(match, field, value, is_mask)		    \
+	do {								    \
+		update_range(match, offsetof(struct sw_flow_key, field),    \
+			     sizeof((match)->key->field), is_mask);	    \
+		if (is_mask)						    \
+			memset((u8 *)&(match)->mask->key.field, value,      \
+			       sizeof((match)->mask->key.field));	    \
+		else							    \
+			memset((u8 *)&(match)->key->field, value,           \
+			       sizeof((match)->key->field));                \
+	} while (0)
 
 #endif /* flow.h */

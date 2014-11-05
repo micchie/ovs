@@ -18,6 +18,7 @@
 
 #include "flow.h"
 #include "datapath.h"
+#include "flow_netlink.h"
 #include <linux/uaccess.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -56,6 +57,14 @@
 
 static struct kmem_cache *flow_cache;
 struct kmem_cache *flow_stats_cache __read_mostly;
+
+static struct flow_fastpath fastpath_array[] =
+{
+	{
+	}
+};
+#define FASTPATH_ARRAY_LEN ARRAY_SIZE(fastpath_array)
+static void fastpath_update(struct flow_table *tbl);
 
 static u16 range_n_bytes(const struct sw_flow_key_range *range)
 {
@@ -263,10 +272,32 @@ static int tbl_mask_array_realloc(struct flow_table *tbl, int size)
 	return 0;
 }
 
+static void tbl_mask_array_delete_mask(struct mask_array *, struct sw_flow_mask *);
+static void flow_fastpath_destroy(struct flow_table *table)
+{
+	int i, j;
+
+	rcu_assign_pointer(table->fastpath, NULL);
+	for (i = 0; i < FASTPATH_ARRAY_LEN; i++) {
+		struct flow_fastpath *fp = &fastpath_array[i];
+		struct mask_array *ma = fp->ma;
+
+		/* we have not been ref-counted masks */
+		for (j = 0; j < ma->count; j++) {
+			struct sw_flow_mask *mask = ovsl_dereference(ma->masks[j]);
+
+			tbl_mask_array_delete_mask(ma, mask);
+			call_rcu(&mask->rcu, rcu_free_sw_flow_mask_cb);
+		}
+		ma->max = 0;
+	}
+}
+
 int ovs_flow_tbl_init(struct flow_table *table)
 {
 	struct table_instance *ti;
 	struct mask_array *ma;
+	int i;
 
 	table->mask_cache = __alloc_percpu(sizeof(struct mask_cache_entry) *
 					  MC_HASH_ENTRIES, __alignof__(struct mask_cache_entry));
@@ -285,6 +316,11 @@ int ovs_flow_tbl_init(struct flow_table *table)
 	rcu_assign_pointer(table->mask_array, ma);
 	table->last_rehash = jiffies;
 	table->count = 0;
+	rcu_assign_pointer(table->fastpath, NULL);
+	for (i = 0; i < FASTPATH_ARRAY_LEN; i++) {
+		struct flow_fastpath *fp = &fastpath_array[i];
+		fp->init(fp);
+	}
 	return 0;
 
 free_mask_array:
@@ -337,6 +373,7 @@ void ovs_flow_tbl_destroy(struct flow_table *table)
 {
 	struct table_instance *ti = rcu_dereference_raw(table->ti);
 
+	flow_fastpath_destroy(table);
 	free_percpu(table->mask_cache);
 	kfree(rcu_dereference_raw(table->mask_array));
 	table_instance_destroy(ti, false);
@@ -696,6 +733,7 @@ static void flow_mask_remove(struct flow_table *tbl, struct sw_flow_mask *mask)
 
 			ma = ovsl_dereference(tbl->mask_array);
 			tbl_mask_array_delete_mask(ma, mask);
+			fastpath_update(tbl);
 
 			/* Shrink the mask array if necessary. */
 			if (ma->max >= (MASK_ARRAY_SIZE_MIN * 2) &&
@@ -710,6 +748,7 @@ static void flow_mask_remove(struct flow_table *tbl, struct sw_flow_mask *mask)
 void ovs_flow_tbl_remove(struct flow_table *table, struct sw_flow *flow)
 {
 	struct table_instance *ti = ovsl_dereference(table->ti);
+	struct flow_fastpath *fp;
 
 	BUG_ON(table->count == 0);
 	hlist_del_rcu(&flow->hash_node[ti->node_ver]);
@@ -719,6 +758,10 @@ void ovs_flow_tbl_remove(struct flow_table *table, struct sw_flow *flow)
 	 * accessible as long as the RCU read lock is held.
 	 */
 	flow_mask_remove(table, flow->mask);
+
+	fp = ovsl_dereference(table->fastpath);
+	if (fp && fp->update)
+		fp->update(table, fp);
 }
 
 static struct sw_flow_mask *mask_alloc(void)
@@ -811,6 +854,7 @@ static int flow_mask_insert(struct flow_table *tbl, struct sw_flow *flow,
 	}
 
 	flow->mask = mask;
+	fastpath_update(tbl);
 	return 0;
 }
 
@@ -821,6 +865,7 @@ int ovs_flow_tbl_insert(struct flow_table *table, struct sw_flow *flow,
 	struct table_instance *new_ti = NULL;
 	struct table_instance *ti;
 	int err;
+	struct flow_fastpath *fp;
 
 	err = flow_mask_insert(table, flow, mask);
 	if (err)
@@ -843,7 +888,69 @@ int ovs_flow_tbl_insert(struct flow_table *table, struct sw_flow *flow,
 		table_instance_destroy(ti, true);
 		table->last_rehash = jiffies;
 	}
+
+	fp = ovsl_dereference(table->fastpath);
+	if (fp && fp->update)
+		fp->update(table, fp);
 	return 0;
+}
+
+/* Return 0 if two mask arrays are identical in random
+ * order. We assume no duplicate in each of arrays.
+ */
+static int mask_array_cmp(const struct mask_array *a, const struct mask_array *b)
+{
+	int i, j;
+
+	if (a->count != b->count)
+		return 1;
+
+	for (i = 0; i < a->count; i++) {
+		struct sw_flow_mask *x;
+
+	        x = ovsl_dereference(a->masks[i]);
+		if (unlikely(!x))
+			continue;
+		for (j = 0; j < b->count; j++) {
+			struct sw_flow_mask *y;
+
+			y = ovsl_dereference(b->masks[j]);
+			if (unlikely(!y))
+				continue;
+			if (mask_equal(x, y))
+				break;
+		}
+		if (j == b->count)
+			return 1;
+	}
+	return 0;
+}
+
+/*
+ * Search for a corresponding fastpath implementation.
+ * If there is a match, we install the corresponding one,
+ * otherwise de-install current one.
+ * So this can be used on both addition and deletion of a mask.
+ */
+static void fastpath_update(struct flow_table *tbl)
+{
+	const struct mask_array *ma;
+	int i;
+
+	ma = ovsl_dereference(tbl->mask_array);
+
+	for (i = 0; i < FASTPATH_ARRAY_LEN; i++) {
+		struct flow_fastpath *fp = &fastpath_array[i];
+
+		if (!fp->ma)
+			continue;
+		else if (mask_array_cmp(fp->ma, ma) == 0) {
+			rcu_assign_pointer(tbl->fastpath, fp);
+			break;
+		}
+	}
+	if (i == FASTPATH_ARRAY_LEN && ovsl_dereference(tbl->fastpath) != NULL)
+		rcu_assign_pointer(tbl->fastpath, NULL);
 }
 
 /* Initializes the flow module.
