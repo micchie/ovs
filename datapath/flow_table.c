@@ -58,9 +58,17 @@
 static struct kmem_cache *flow_cache;
 struct kmem_cache *flow_stats_cache __read_mostly;
 
+static struct sw_flow *fastpath_lookup_l2addrs(struct sk_buff *,
+						struct sw_flow_key *, int *);
+static void fastpath_init_l2addrs(struct flow_fastpath *);
 static struct flow_fastpath fastpath_array[] =
 {
 	{
+		.lookup = fastpath_lookup_l2addrs,
+		.init = fastpath_init_l2addrs,
+		.update = NULL,
+		.data = NULL,
+		.ma = NULL,
 	}
 };
 #define FASTPATH_ARRAY_LEN ARRAY_SIZE(fastpath_array)
@@ -985,4 +993,75 @@ void ovs_flow_exit(void)
 {
 	kmem_cache_destroy(flow_stats_cache);
 	kmem_cache_destroy(flow_cache);
+}
+
+static void fastpath_init_l2addrs(struct flow_fastpath *fp)
+{
+	struct mask_array *ma = fp->ma;
+	struct sw_flow_mask *mask;
+	struct sw_flow_match match;
+	struct sw_flow_key dummy;
+	struct ovs_key_ethernet eth_key;
+	u32 in_port;
+	__be16 tci;
+
+	ma = tbl_mask_array_alloc(MASK_ARRAY_SIZE_MIN);
+	if (!ma)
+		return;
+	mask = mask_alloc();
+	if (!mask)
+		return; /* ma->max == 0 indicates uninitialized */
+
+	ovs_match_init(&match, &dummy, mask);
+	memset(mask, 0, sizeof(*mask));
+
+	in_port = 0xffffffff;
+	SW_FLOW_KEY_PUT(&match, phy.in_port, in_port, true);
+	memset(eth_key.eth_src, 0xff, sizeof(eth_key.eth_src));
+	SW_FLOW_KEY_MEMCPY(&match, eth.src, eth_key.eth_src, ETH_ALEN, true);
+	memset(eth_key.eth_dst, 0xff, sizeof(eth_key.eth_dst));
+	SW_FLOW_KEY_MEMCPY(&match, eth.dst, eth_key.eth_dst, ETH_ALEN, true);
+	tci = htons(0xffff);
+	SW_FLOW_KEY_PUT(&match, eth.tci, tci, true);
+
+	rcu_assign_pointer(fp->ma, ma);
+	rcu_assign_pointer(ma->masks[0], mask);
+	ma->count++;
+	return;
+}
+
+static struct sw_flow *fastpath_lookup_l2addrs(struct sk_buff *skb,
+					       struct sw_flow_key *key, int *error)
+{
+	struct sw_flow *flow;
+	const struct vport *p = OVS_CB(skb)->input_vport;
+	struct datapath *dp = p->dp;
+	struct ethhdr *eth;
+	struct table_instance *ti;
+	struct hlist_head *head;
+	struct sw_flow_mask *mask;
+	unsigned short start, end;
+	u32 hash;
+	const struct flow_fastpath *fp = rcu_dereference_ovsl(dp->table.fastpath);
+
+	*error = 0;
+	key->tp.flags = 0;
+	skb_reset_mac_header(skb);
+	eth = eth_hdr(skb);
+	ether_addr_copy(key->eth.src, eth->h_source);
+	ether_addr_copy(key->eth.dst, eth->h_dest);
+
+	mask = rcu_dereference_ovsl(fp->ma->masks[0]);
+	start = mask->range.start;
+	end = mask->range.end;
+
+	/* key is already masked */
+	ti = rcu_dereference_ovsl(dp->table.ti);
+	hash = flow_hash(key, start, end);
+	head = find_bucket(ti, hash);
+	hlist_for_each_entry_rcu(flow, head, hash_node[ti->node_ver]) {
+		if (flow->hash == hash && flow_cmp_masked_key(flow, key, start, end))
+			return flow;
+	}
+	return NULL;
 }
