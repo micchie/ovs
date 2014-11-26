@@ -61,12 +61,24 @@ struct kmem_cache *flow_stats_cache __read_mostly;
 static struct sw_flow *fastpath_lookup_l2addrs(struct sk_buff *,
 						struct sw_flow_key *, int *);
 static void fastpath_init_l2addrs(struct flow_fastpath *);
+static struct sw_flow *fastpath_lookup_vlan(struct sk_buff *,
+					    struct sw_flow_key *, int *);
+static void fastpath_init_vlan(struct flow_fastpath *);
+static void fastpath_update_vlan(struct flow_table *, struct flow_fastpath *);
+
 static struct flow_fastpath fastpath_array[] =
 {
 	{
 		.lookup = fastpath_lookup_l2addrs,
 		.init = fastpath_init_l2addrs,
 		.update = NULL,
+		.data = NULL,
+		.ma = NULL,
+	},
+	{
+		.lookup = fastpath_lookup_vlan,
+		.init = fastpath_init_vlan,
+		.update = fastpath_update_vlan,
 		.data = NULL,
 		.ma = NULL,
 	}
@@ -1064,4 +1076,93 @@ static struct sw_flow *fastpath_lookup_l2addrs(struct sk_buff *skb,
 			return flow;
 	}
 	return NULL;
+}
+
+static struct sw_flow *fastpath_lookup_vlan(struct sk_buff *skb,
+					    struct sw_flow_key *key, int *error)
+{
+	const struct vport *p = OVS_CB(skb)->input_vport;
+	struct datapath *dp = p->dp;
+	struct ethhdr *eth;
+	const struct flow_fastpath *fp = rcu_dereference_ovsl(dp->table.fastpath);
+	struct sw_flow **tci_tbl = (struct sw_flow **)fp->data;
+
+	*error = 0;
+	key->tp.flags = 0;
+	skb_reset_mac_header(skb);
+	eth = eth_hdr(skb);
+	/* XXX we need to copy ethernet addresses */
+	ether_addr_copy(key->eth.src, eth->h_source);
+	ether_addr_copy(key->eth.dst, eth->h_dest);
+
+	__skb_pull(skb, 2 * ETH_ALEN);
+
+	key->eth.tci = 0;
+	if (vlan_tx_tag_present(skb))
+		key->eth.tci = htons(vlan_get_tci(skb));
+	else if (eth->h_proto == htons(ETH_P_8021Q))
+		if (unlikely(parse_vlan(skb, key)))
+			return NULL;
+	key->eth.type = parse_ethertype(skb);
+	if (unlikely(key->eth.type == htons(0)))
+		return NULL;
+	skb_reset_network_header(skb);
+	skb_reset_mac_len(skb);
+	__skb_push(skb, skb->data - skb_mac_header(skb));
+
+	return tci_tbl[ntohs(key->eth.tci)];
+}
+
+static void fastpath_init_vlan(struct flow_fastpath *fp)
+{
+	struct mask_array *ma = fp->ma;
+	struct sw_flow_mask *mask;
+	struct sw_flow_match match;
+	struct sw_flow_key dummy;
+	u32 in_port;
+	__be16 tci;
+
+	/* allocate a compact table (putting flows are done on flow update) */
+	fp->data = kzalloc(sizeof(struct sw_flow *) * 65536, GFP_KERNEL);
+	if (!fp->data)
+		return;
+
+	ma = tbl_mask_array_alloc(MASK_ARRAY_SIZE_MIN);
+	if (!ma)
+		return;
+	mask = mask_alloc();
+	if (!mask)
+		return; /* ma->max == 0 indicates uninitialized */
+
+	ovs_match_init(&match, &dummy, mask);
+	memset(mask, 0, sizeof(*mask));
+
+	in_port = 0xffffffff;
+	SW_FLOW_KEY_PUT(&match, phy.in_port, in_port, true);
+	tci = htons(0xffff);
+	SW_FLOW_KEY_PUT(&match, eth.tci, tci, true);
+
+	rcu_assign_pointer(fp->ma, ma);
+	rcu_assign_pointer(ma->masks[0], mask);
+	ma->count++;
+	return;
+}
+
+static void fastpath_update_vlan(struct flow_table *tbl,
+				 struct flow_fastpath *fp)
+{
+	struct table_instance *ti = ovsl_dereference(tbl->ti);
+	struct sw_flow **vlan_flows = (struct sw_flow **)fp->data;
+	int i;
+
+	/* XXX should be optimized */
+	memset(vlan_flows, 0, sizeof(struct sw_flow *) * 65536);
+	for (i = 0; i < ti->n_buckets; i++) {
+		struct sw_flow *flow;
+		struct hlist_head *head;
+
+		head = flex_array_get(ti->buckets, i);
+		hlist_for_each_entry(flow, head, hash_node[ti->node_ver])
+			vlan_flows[ntohs(flow->key.eth.tci)] = flow;
+	}
 }

@@ -301,4 +301,6 @@ void update_range(struct sw_flow_match *, size_t, size_t, bool);
 			       sizeof((match)->key->field));                \
 	} while (0)
 
+int parse_vlan(struct sk_buff *skb, struct sw_flow_key *key);
+__be16 parse_ethertype(struct sk_buff *skb);
 #endif /* flow.h */

@@ -293,7 +293,7 @@ static bool icmp6hdr_ok(struct sk_buff *skb)
 				  sizeof(struct icmp6hdr));
 }
 
-static int parse_vlan(struct sk_buff *skb, struct sw_flow_key *key)
+int parse_vlan(struct sk_buff *skb, struct sw_flow_key *key)
 {
 	struct qtag_prefix {
 		__be16 eth_type; /* ETH_P_8021Q */
@@ -315,7 +315,7 @@ static int parse_vlan(struct sk_buff *skb, struct sw_flow_key *key)
 	return 0;
 }
 
-static __be16 parse_ethertype(struct sk_buff *skb)
+__be16 parse_ethertype(struct sk_buff *skb)
 {
 	struct llc_snap_hdr {
 		u8  dsap;  /* Always 0xAA */
