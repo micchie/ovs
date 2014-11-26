@@ -53,7 +53,7 @@
 static bool match_validate(const struct sw_flow_match *match,
 			   u64 key_attrs, u64 mask_attrs, bool log)
 {
-	u64 key_expected = 1ULL << OVS_KEY_ATTR_ETHERNET;
+	u64 key_expected = 0;
 	u64 mask_allowed = key_attrs;  /* At most allow all key attributes */
 
 	/* The following mask attributes allowed only if they
@@ -72,7 +72,8 @@ static bool match_validate(const struct sw_flow_match *match,
 			| (1ULL << OVS_KEY_ATTR_MPLS));
 
 	/* Always allowed mask fields. */
-	mask_allowed |= ((1ULL << OVS_KEY_ATTR_TUNNEL)
+	mask_allowed |= ((1ULL << OVS_KEY_ATTR_ETHERNET)
+		       | (1ULL << OVS_KEY_ATTR_TUNNEL)
 		       | (1ULL << OVS_KEY_ATTR_IN_PORT)
 		       | (1ULL << OVS_KEY_ATTR_ETHERTYPE));
 
