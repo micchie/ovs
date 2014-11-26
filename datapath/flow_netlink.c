@@ -909,8 +909,7 @@ int ovs_nla_get_match(struct sw_flow_match *match,
 	if (err)
 		return err;
 
-	if ((key_attrs & (1ULL << OVS_KEY_ATTR_ETHERNET)) &&
-	    (key_attrs & (1ULL << OVS_KEY_ATTR_ETHERTYPE)) &&
+	if ((key_attrs & (1ULL << OVS_KEY_ATTR_ETHERTYPE)) &&
 	    (nla_get_be16(a[OVS_KEY_ATTR_ETHERTYPE]) == htons(ETH_P_8021Q))) {
 		__be16 tci;
 
